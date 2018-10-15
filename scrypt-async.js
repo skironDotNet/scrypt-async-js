@@ -4,6 +4,8 @@
  * https://github.com/dchest/scrypt-async-js
  */
 
+  /* Based on orginal modification by Daniel Routman to provide progress callback function*/
+  
 /**
  * scrypt(password, salt, options, callback)
  *
@@ -41,9 +43,11 @@
  * Pass 0 to have callback called immediately.
  *
  */
-function scrypt(password, salt, logN, r, dkLen, interruptStep, callback, encoding) {
+function scrypt(password, salt, logN, r, dkLen, interruptStep, resultCallback, encoding, progressCallback) {
   'use strict';
 
+  var iprog;
+  
   function SHA256(m) {
     /** @const */ var K = [
       0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
@@ -387,7 +391,7 @@ function scrypt(password, salt, logN, r, dkLen, interruptStep, callback, encodin
 
     var opts = logN;
 
-    callback = r;
+    resultCallback = r;
     logN = opts.logN;
     if (typeof logN === 'undefined') {
       if (typeof opts.N !== 'undefined') {
@@ -494,13 +498,15 @@ function scrypt(password, salt, logN, r, dkLen, interruptStep, callback, encodin
   function interruptedFor(start, end, step, fn, donefn) {
     (function performStep() {
       nextTick(function() {
+      	progressCallback(((iprog/Math.ceil(N/interruptStep))*100).toFixed(2));
         fn(start, start + step < end ? start + step : end);
         start += step;
+        iprog++;
         if (start < end)
           performStep();
         else
           donefn();
-        });
+        }, 0);
     })();
   }
 
@@ -524,11 +530,12 @@ function scrypt(password, salt, logN, r, dkLen, interruptStep, callback, encodin
       smixStep2(0, N);
       smixFinish(i*128*r);
     }
-    callback(getResult(encoding));
+    resultCallback(getResult(encoding));
   }
 
   // Async variant.
   function calculateAsync(i) {
+      iprog = 0;
       smixStart(i*128*r);
       interruptedFor(0, N, interruptStep*2, smixStep1, function() {
         interruptedFor(0, N, interruptStep*2, smixStep2, function () {
@@ -536,20 +543,20 @@ function scrypt(password, salt, logN, r, dkLen, interruptStep, callback, encodin
           if (i + 1 < p) {
             nextTick(function() { calculateAsync(i + 1); });
           } else {
-            callback(getResult(encoding));
+            resultCallback(getResult(encoding));
           }
         });
       });
   }
 
   if (typeof interruptStep === 'function') {
-    // Called as: scrypt(...,      callback, [encoding])
-    //  shifting: scrypt(..., interruptStep,  callback, [encoding])
-    encoding = callback;
-    callback = interruptStep;
+    // Called as: scrypt(...,      resultCallback, [encoding])
+    //  shifting: scrypt(..., interruptStep,  resultCallback, [encoding])
+    encoding = resultCallback;
+    resultCallback = interruptStep;
     interruptStep = 1000;
   }
-
+  
   if (interruptStep <= 0) {
     calculateSync();
   } else {
